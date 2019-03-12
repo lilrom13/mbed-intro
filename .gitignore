@@ -2,3 +2,4 @@ build/
 mbed_settings.*
 mbed-os/
 mbed-os.lib
+.vscode/
