@@ -21,17 +21,9 @@ static InterruptIn button(BUTTON1);
 static EventQueue queue(32 * EVENTS_EVENT_SIZE);
 static Thread t;
 
-BusOut rows(PB_2, PA_15, PA_2, PA_7, PA_6, PA_5, PB_0, PA_3);
+static Ticker blinkLed2;
 
-static void led_g_on()
-{
-  led2 = 1;
-}
-
-static void led_g_off()
-{
-  led2 = 0;
-}
+static BusOut rows(PB_2, PA_15, PA_2, PA_7, PA_6, PA_5, PB_0, PA_3);
 
 static void pulse_SCK()
 {
@@ -126,24 +118,26 @@ static void init_matrix()
 
 static void fall_handler(void)
 {
-  printf("fall_handler in context %p\r\n", Thread::gettid());
-  // Toggle LED
+  // Toggle LED1
+  wait(1);
   led1 = 1;
   wait(0.1);
   led1 = 0;
 }
 
-int main() {
-  // Start the event queue
-  t.start(callback(&queue, &EventQueue::dispatch_forever));
-  printf("Starting in context %p\r\n", Thread::gettid());
-  // The 'fall' handler will execute in the context of thread 't'
-  button.fall(queue.event(fall_handler));
+static void blink() {
+  led2 = !led2;
+}
 
-  for (;;) {
-    led2 = !led2;
-    wait(0.2);
-  }
+int main() {
+  // blinkLed2.attach(&blink, 0.1);
+
+  // Start the event queue
+  // t.start(callback(&queue, &EventQueue::dispatch_forever));
+
+  // The 'fall' handler will execute in the context of thread 't'
+  // button.fall(queue.event(fall_handler));
+
   init_matrix();
 
   test_pixels();
