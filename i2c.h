@@ -8,11 +8,11 @@ class i2c_slave_controller: public I2CSlave
 private:
     char _i2c_index;
 
-    // char cmds[11] = { 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0F, 0x80, 0x81 };
-
     DigitalOut led1;
     DigitalOut led2;
     DigitalOut led3;
+
+    char scratchpads[16];
 
     Thread *thread;
 

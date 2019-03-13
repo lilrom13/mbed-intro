@@ -4,9 +4,10 @@
 i2c_slave_controller::i2c_slave_controller(PinName sda, PinName scl, int addr): I2CSlave(sda, scl), led1(LED1), led2(LED2), led3(LED3)
 {
     address(addr);
-    _i2c_index = 0x06;
+    _i2c_index = 0;
 
-    printf("addr = %d, i2c_index = %d\n", addr, _i2c_index);
+    for (int i = 0; i < 16; i++)
+        scratchpads[0] = 0;
 }
 
 void i2c_slave_controller::start()
@@ -17,10 +18,10 @@ void i2c_slave_controller::start()
 void i2c_slave_controller::i2c_handle_write()
 {
     char buf[1];
+    int ret = 0;
+    int scratchpad_index = 0;
 
-    int ret = read(&_i2c_index, 1);
-
-    printf("ret = %d, i2c_index = %d, \n", ret, _i2c_index);
+    ret = read(&_i2c_index, 1);
 
     if (ret != 0)
     {
@@ -30,6 +31,8 @@ void i2c_slave_controller::i2c_handle_write()
 
     while (1)
     {
+        int index = 0;
+
         if (read(buf, 1) < 0)
         {
             printf("end of transaction\n");
@@ -39,6 +42,30 @@ void i2c_slave_controller::i2c_handle_write()
 
         switch (buf[0])
         {
+            case 0x02:
+                scratchpad_index = 0;
+                scratchpads[scratchpad_index + index++] = buf[0];
+                _i2c_index++;
+                break;
+            
+            case 0x03:
+                scratchpad_index = 4;
+                scratchpads[scratchpad_index + index++] = buf[0];
+                _i2c_index++;
+                break;
+
+            case 0x04:
+                scratchpad_index = 8;
+                scratchpads[scratchpad_index + index++] = buf[0];
+                _i2c_index++;
+                break;
+
+            case 0x05:
+                scratchpad_index = 12;
+                scratchpads[scratchpad_index + index++] = buf[0];
+                _i2c_index++;
+                break;
+
             case 0x06:
                 led1 = buf[0]? 1: 0;
                 _i2c_index++;
@@ -59,7 +86,24 @@ void i2c_slave_controller::i2c_handle_write()
 
 void i2c_slave_controller::i2c_handle_read()
 {
-    // on va lire ce que le maître demande puis on lui répond
+    char buf;
+    ret = read(&buf, 1);
+
+    if (ret != 0)
+    {
+        printf("empty paquet\n");
+        return;
+    }
+
+    switch (buf)
+    {
+        case 0x0F:
+            write(address, 1);
+            break;
+    
+        default:
+            break;
+    }
 }
 
 void i2c_slave_controller::i2c_handle(void const *arg)
