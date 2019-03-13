@@ -1,144 +1,72 @@
 #include <mbed.h>
 #include "mbed_events.h"
+#include "matrix.hh"
+#include "matrix_controller.hh"
 
-typedef struct {
-  uint8_t r;
-  uint8_t g;
-  uint8_t b;
-} rgb_t;
+Matrix_controller matrix_ctrl;
 
-static DigitalOut led1(LED1);
-static DigitalOut led2(LED2);
+// Gestion d'affichage
+static Queue<Matrix, 1> matrix_full;
+static Queue<Matrix, 2> matrix_empty;
 
-static DigitalOut SB(PC_5);
-static DigitalOut LAT(PC_4);
-static DigitalOut RST(PC_3);
-static DigitalOut SCK(PB_1);
-static DigitalOut SDA(PA_4);
+static Thread displayThread;
 
-static InterruptIn button(BUTTON1);
+static Matrix image1;
+static Matrix image2;
 
-static EventQueue queue(32 * EVENTS_EVENT_SIZE);
-static Thread t;
+static RGB_color RGB_color_tab[2] = { RGB_color(255, 0, 0), RGB_color(0, 255, 0) };
+static uint8_t color_count = 0;
 
-static Ticker blinkLed2;
-
-static BusOut rows(PB_2, PA_15, PA_2, PA_7, PA_6, PA_5, PB_0, PA_3);
-
-static void pulse_SCK()
+static void display()
 {
-  SCK = 0;
-  SCK = 1;
-  SCK = 0;
-}
+  osEvent evt;
+  Matrix *current_buffer;
 
-static void pulse_LAT()
-{
-  LAT = 1;
-  LAT = 0;
-  LAT = 1;
-}
+  evt = matrix_full.get();
 
-static void deactivate_rows()
-{
-  rows = 0;
-}
+  if (evt.status == osEventMessage)
+    current_buffer = (Matrix *)evt.value.p;
 
-static void activate_row(int row)
-{
-  rows = 1 << row;
-}
+  while (1)
+  {
+    matrix_ctrl.sendMatrix(*current_buffer);
 
-static void send_byte(uint8_t val, int bank)
-{
-    SB = bank;
-    uint8_t MSB;
+    evt = matrix_full.get(0);
 
-    for(int i = 0; i < 8; i++)
+    if (evt.status == osEventMessage)
     {
-      MSB = (val & (1 << (7 - i))) ? 1 : 0;
-      SDA = MSB;
-      pulse_SCK();
+      matrix_empty.put(current_buffer);
+      current_buffer = (Matrix *)evt.value.p;
     }
+  }
 }
 
-void mat_set_row(int row, const rgb_t *color)
+static void blink_matrix()
 {
-    for(int i = 7; i >= 0; i--){
-      send_byte(color->b, 1);
-      send_byte(color->g, 1);
-      send_byte(color->r, 1);
-      color++;
-    }
+  osEvent evt;
+  Matrix *tmp_image;
 
-    pulse_LAT();
-    activate_row(row);
+  while (1)
+  {
+    evt = matrix_empty.get();
+
+    if (evt.status == osEventMessage)
+      tmp_image = (Matrix *) evt.value.p;
+
+    tmp_image->setColor(RGB_color_tab[color_count++ % 2]);
+
+    matrix_full.put(tmp_image);
+
+    ThisThread::sleep_for(500);
+  }
 }
 
-static void test_pixels()
+int main()
 {
-  rgb_t matrix[8][8];
+  matrix_empty.put(&image1);
+  matrix_empty.put(&image2);
 
-  for (int i=0; i<8; i++)
-    for (int j=0; j<8; j++)
-    {
-      matrix[i][j].r = 255;
-      matrix[i][j].g = 0;
-      matrix[i][j].b = 0;
-     }
+  displayThread.start(display);
 
-  for(;;)
-    for (int i = 0; i < 8; i++)
-      mat_set_row(i, matrix[0]);
-}
-
-static void init_bank0()
-{
-  for(int i = 0; i < 18; i++)
-      send_byte(0xFF, 0);
-  pulse_LAT();
-}
-
-static void init_matrix()
-{
-  deactivate_rows();
-
-  LAT = 1;
-  SB = 1;
-  SCK = 0;
-  SDA = 0;
-  RST = 0;
-  
-  wait(0.1);
-  
-  RST = 1;
-
-  init_bank0();
-}
-
-static void fall_handler(void)
-{
-  // Toggle LED1
-  wait(1);
-  led1 = 1;
-  wait(0.1);
-  led1 = 0;
-}
-
-static void blink() {
-  led2 = !led2;
-}
-
-int main() {
-  // blinkLed2.attach(&blink, 0.1);
-
-  // Start the event queue
-  // t.start(callback(&queue, &EventQueue::dispatch_forever));
-
-  // The 'fall' handler will execute in the context of thread 't'
-  // button.fall(queue.event(fall_handler));
-
-  init_matrix();
-
-  test_pixels();
+  blink_matrix();
 }
