@@ -1,5 +1,5 @@
 #include <mbed.h>
-#include "mbed_events.h"
+#include "i2c.h"
 #include "matrix.hh"
 #include "matrix_controller.hh"
 
@@ -63,6 +63,10 @@ static void blink_matrix()
 
 int main()
 {
+  i2c_slave_controller i2c_slave_ctrl(PB_9, PB_8, 0x2A << 1);
+
+  i2c_slave_ctrl.start();
+  
   matrix_empty.put(&image1);
   matrix_empty.put(&image2);
 
