@@ -2,29 +2,39 @@
 #define I2C_H_
 
 #include "mbed.h"
+#include "matrix.hh"
 
 class i2c_slave_controller: public I2CSlave
 {
 private:
-    char _i2c_index;
+    char _addr;
+    const char _id;
+
+    Queue<Matrix, 1> *_matrix_full;
+    Queue<Matrix, 2> *_matrix_empty;
 
     DigitalOut led1;
     DigitalOut led2;
     DigitalOut led3;
 
-    char scratchpads[16];
+    Mutex &_m;
+    uint8_t *_button_pressed_count;
 
-    Thread *thread;
+    char scratchpad[4];
 
-    static void i2c_handle(void const *arg);
+    Thread _thread;
 
-    void i2c_handle_write();
-    void i2c_handle_read();
+    int wait_for_request();
+    int answer_read_request(const char *, size_t);
+    int get_write_request_parameters(char *, size_t);
+    void handle_command(char);
 
+    static void threadStarter(void const *p);
+
+    void loop();
+    
 public:
-    i2c_slave_controller(PinName sda, PinName scl, int addr);
-
-    void start();
+    i2c_slave_controller(PinName sda, PinName scl, char addr, Queue<Matrix, 1> * matrix_full, Queue<Matrix, 2> * matrix_empty, Mutex &m, uint8_t *button_pressed_count);
 };
 
 #endif

@@ -50,23 +50,22 @@ void Matrix_controller::init_bank0()
 void Matrix_controller::send_byte(const uint8_t val, int bank)
 {
     SB = bank;
-    uint8_t MSB;
-
+    
     for(int i = 0; i < 8; i++)
     {
-        MSB = (val & (1 << (7 - i))) ? 1 : 0;
+        uint8_t MSB = (val & (1 << (7 - i))) ? 1 : 0;
         SDA = MSB;
         pulse_SCK();
     }
 }
 
-void Matrix_controller::sendMatrix(const Matrix &m)
-{
+void Matrix_controller::sendMatrix(Matrix *matrix)
+{   
     for (int row = 0; row < 8; row++)
     {
         for(int i = 7; i >= 0; i--)
         {
-            RGB_color color = m.getPixel(row * 8 + i);
+            RGB_color color = matrix->getPixel(row * 8 + i);
 
             send_byte(color.getB(), 1);
             send_byte(color.getG(), 1);
@@ -77,4 +76,3 @@ void Matrix_controller::sendMatrix(const Matrix &m)
         activate_row(row);
     }
 }
-

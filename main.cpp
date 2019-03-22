@@ -9,68 +9,52 @@ Matrix_controller matrix_ctrl;
 static Queue<Matrix, 1> matrix_full;
 static Queue<Matrix, 2> matrix_empty;
 
-static Thread displayThread;
-
 static Matrix image1;
 static Matrix image2;
 
-static RGB_color RGB_color_tab[2] = { RGB_color(255, 0, 0), RGB_color(0, 255, 0) };
-static uint8_t color_count = 0;
+static EventQueue queue;
+
+static Thread displayThread;
+static Thread t;
+
+static InterruptIn button(BUTTON1);
+static Mutex m;
+static uint8_t button_pressed_count;
 
 static void display()
 {
-  osEvent evt;
-  Matrix *current_buffer;
+  osEvent evt = matrix_full.get();
 
-  evt = matrix_full.get();
-
-  if (evt.status == osEventMessage)
-    current_buffer = (Matrix *)evt.value.p;
+  Matrix *current_buffer = (Matrix *)evt.value.p;
 
   while (1)
   {
-    matrix_ctrl.sendMatrix(*current_buffer);
+    matrix_ctrl.sendMatrix(current_buffer);
 
     evt = matrix_full.get(0);
 
-    if (evt.status == osEventMessage)
-    {
-      matrix_empty.put(current_buffer);
-      current_buffer = (Matrix *)evt.value.p;
-    }
+    matrix_empty.put(current_buffer);
+    current_buffer = (Matrix *)evt.value.p;
   }
 }
 
-static void blink_matrix()
-{
-  osEvent evt;
-  Matrix *tmp_image;
-
-  while (1)
-  {
-    evt = matrix_empty.get();
-
-    if (evt.status == osEventMessage)
-      tmp_image = (Matrix *) evt.value.p;
-
-    tmp_image->setColor(RGB_color_tab[color_count++ % 2]);
-
-    matrix_full.put(tmp_image);
-
-    ThisThread::sleep_for(500);
-  }
+static void rise_handle(void)
+{  
+  m.lock();
+  button_pressed_count++;
+  m.unlock();
 }
 
 int main()
 {
-  i2c_slave_controller i2c_slave_ctrl(PB_9, PB_8, 0x2A << 1);
+  t.start(callback(&queue, &EventQueue::dispatch_forever));
 
-  i2c_slave_ctrl.start();
-  
+  button.rise(queue.event(rise_handle));
+
   matrix_empty.put(&image1);
   matrix_empty.put(&image2);
 
   displayThread.start(display);
 
-  blink_matrix();
+  i2c_slave_controller i2c_slave_ctrl(PB_9, PB_8, 0x2A << 1, &matrix_full, &matrix_empty, m, &button_pressed_count);
 }

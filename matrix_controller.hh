@@ -25,7 +25,7 @@ private:
 public:
     Matrix_controller();
 
-    void sendMatrix(const Matrix &);
+    void sendMatrix(Matrix *);
 };
 
 #endif

@@ -1,128 +1,197 @@
 #include "mbed.h"
 #include "i2c.h"
+#include "matrix.hh"
 
-i2c_slave_controller::i2c_slave_controller(PinName sda, PinName scl, int addr): I2CSlave(sda, scl), led1(LED1), led2(LED2), led3(LED3)
+i2c_slave_controller::i2c_slave_controller(PinName sda, PinName scl, char addr, Queue<Matrix, 1> * matrix_full, Queue<Matrix, 2> * matrix_empty, Mutex &m, uint8_t *button_pressed_count): 
+I2CSlave(sda, scl), _addr(addr), _id('*'), _matrix_full(matrix_full), _matrix_empty(matrix_empty), led1(LED1), led2(LED2), led3(LED3),
+_m(m), _button_pressed_count(button_pressed_count), _thread()
 {
-    address(addr);
-    _i2c_index = 0;
+    address(_addr);
 
-    for (int i = 0; i < 16; i++)
-        scratchpads[0] = 0;
+    for (int i = 0; i < 4; i++)
+        scratchpad[0] = 0;
+
+    threadStarter(this);
 }
 
-void i2c_slave_controller::start()
+void i2c_slave_controller::threadStarter(void const *p)
 {
-    thread = new Thread(callback(i2c_handle, this));
+    i2c_slave_controller *instance = (i2c_slave_controller*)p;
+    instance->loop();
 }
 
-void i2c_slave_controller::i2c_handle_write()
+void i2c_slave_controller::loop()
 {
-    char buf[1];
-    int ret = 0;
-    int scratchpad_index = 0;
-
-    ret = read(&_i2c_index, 1);
-
-    if (ret != 0)
-    {
-        printf("empty paquet\n");
-        return;
-    }
-
     while (1)
     {
-        int index = 0;
-
-        if (read(buf, 1) < 0)
+        // Waiting for a write from the master
+        // printf("Waiting for write\r\n");
+        if (wait_for_request())
         {
-            printf("end of transaction\n");
-            stop();
-            return;
+            // we received a write            
+            // getting the command
+            char cmd;
+
+            if (read(&cmd, 1) == 0)
+                printf("read the cmd with success: cmd = %x\r\n", cmd);
+            else
+                printf("read error\r\n");
+
+            // now the master can either do a read or a writex
+            handle_command(cmd);
         }
+    }
+}
 
-        switch (buf[0])
+void i2c_slave_controller::handle_command(char cmd)
+{
+    switch (cmd)
+    {
+        case 0x02: // (Écriture) Contenu à écrire dans le scratchpad ✅
         {
-            case 0x02:
-                scratchpad_index = 0;
-                scratchpads[scratchpad_index + index++] = buf[0];
-                _i2c_index++;
-                break;
+            char param1[4];
+
+            get_write_request_parameters(param1, 4);
+            for (int i = 0; i < 4; i++)
+                scratchpad[i] = param1[i];
+        }
+        break;
+        case 0x06: // (Écriture) Le bit 0 (poids faible) est écrit dans LED1, le bit 1 dans LED2 et le bit 2 dans LED3 ✅
+        {
+            char ledParam;
+
+            get_write_request_parameters(&ledParam, 1);
+
+            led1 = ledParam & (1 << 0);
+            led2 = ledParam & (1 << 1);
+            led3 = ledParam & (1 << 2);
+        }
+        break;
+        case 0x10: // (Écriture) Image à afficher sur la matrice de leds ✅
+        {
+            char matrix_data[64*3];
+
+            get_write_request_parameters(matrix_data, 64*3);
+
+            osEvent evt = _matrix_empty->get();
+
+            Matrix * tmp_image = (Matrix *) evt.value.p;
+
+            printf("img = %p\n\r", tmp_image);
             
-            case 0x03:
-                scratchpad_index = 4;
-                scratchpads[scratchpad_index + index++] = buf[0];
-                _i2c_index++;
-                break;
+            if (tmp_image != NULL)
+                tmp_image->setMatrix(matrix_data);
 
-            case 0x04:
-                scratchpad_index = 8;
-                scratchpads[scratchpad_index + index++] = buf[0];
-                _i2c_index++;
-                break;
+            _matrix_full->put(tmp_image);
+        }
+        break;
+        case 0x80: // (Lecture) Nombre d'appui sur le bouton BUTTON1 depuis la dernière lecture ✅
+        {
+            _m.lock();
+            char value = (char) *_button_pressed_count;
+            *_button_pressed_count = 0;
+            _m.unlock();
 
-            case 0x05:
-                scratchpad_index = 12;
-                scratchpads[scratchpad_index + index++] = buf[0];
-                _i2c_index++;
-                break;
+            if (answer_read_request(&value, 1) == 0)
+                printf("answer_read_request for 0x80 with success\r\n");
+            else
+                printf("answer_read_request error\r\n");
+        }
+        break;
+        case 0x82: // (Lecture) Contenu du scratchpad ✅
+        {
+            if (answer_read_request(scratchpad, 4) == 0)
+                printf("answer_read_request for 0x82 with success\r\n");
+            else
+                printf("answer_read_request error\r\n");
+        }
+        break;
+        case 0x83: // (Lecture) Adresse I²C de l'esclave sur 7 bits ✅
+        {
+            if (answer_read_request(&_id, 1) == 0)
+                printf("answer_read_request for 0x83 with success\r\n");
+            else
+                printf("answer_read_request error\r\n");   
+        } 
+        break;
+    }
+}
 
-            case 0x06:
-                led1 = buf[0]? 1: 0;
-                _i2c_index++;
-                break;
+int i2c_slave_controller::wait_for_request()
+{
+    int i;
 
-            case 0x07:
-                led2 = buf[0]? 1: 0;
-                _i2c_index++;
-                break;
+    do
+    {
+        i = receive();
 
-            case 0x08:
-                led3 = buf[0]? 1: 0;
-                _i2c_index++;
-                break;
+        switch (i)
+        {
+            case I2CSlave::ReadAddressed:
+                return 0;
+            case I2CSlave::WriteGeneral:
+                return 1;
+            case I2CSlave::WriteAddressed:
+                return 1;
+        }
+    } while (i == I2CSlave::NoData);
+}
+
+/*
+// Écrire une fonction int answer_read_request(const char *data, size_t len)
+// qui attend une requête en lecture (en utilisant wait_for_request) et envoie le
+// contenu de data (avec longueur len). Si une requête en écriture arrive à la place
+// ou si une erreur d'écriture de data a lieu, la fonction renvoie 1, ou 0 si tout s'est bien passé.
+*/
+int i2c_slave_controller::answer_read_request(const char *data, size_t len)
+{
+    while (1)
+    {
+        int i = receive();
+
+        switch (i)
+        {
+            case I2CSlave::ReadAddressed:
+                // envoie le contenu de data (avec longueur len)
+                if (write(data, len) == 0)
+                    return 0;
+                else
+                    return 1;
+            case I2CSlave::WriteGeneral:
+                return 1;
+            case I2CSlave::WriteAddressed:
+                return 1;
         }
     }
 }
 
-void i2c_slave_controller::i2c_handle_read()
+/*
+// Écrire une fonction int get_write_request_parameters(char *data, size_t len)
+// qui attend une requête en écriture (en utilisant wait_for_request) et remplit le
+// contenu de data (avec longueur len) à partir de ce qu'envoie le maître. 
+// Si une requête en lecture arrive à la place ou si une erreur de lecture de data a lieu,
+// la fonction renvoie 1, ou 0 si tout s'est bien passé.
+*/
+int i2c_slave_controller::get_write_request_parameters(char *param, size_t len)
 {
-    char buf;
-    ret = read(&buf, 1);
-
-    if (ret != 0)
-    {
-        printf("empty paquet\n");
-        return;
-    }
-
-    switch (buf)
-    {
-        case 0x0F:
-            write(address, 1);
-            break;
-    
-        default:
-            break;
-    }
-}
-
-void i2c_slave_controller::i2c_handle(void const *arg)
-{
-    i2c_slave_controller* self = (i2c_slave_controller*)arg;
-
     while (1)
     {
-        int i = self->receive();
-        switch (i) {
+        int i = receive();
+
+        switch (i)
+        {
             case I2CSlave::ReadAddressed:
-                self->i2c_handle_read();
-                break;
+                return 1;
             case I2CSlave::WriteGeneral:
-                self->i2c_handle_write();
-                break;
+                if (read(param, len) == 0)
+                    return 0;
+                else
+                    return 1;
             case I2CSlave::WriteAddressed:
-                self->i2c_handle_write();
-                break;
+                if (read(param, len) == 0)
+                    return 0;
+                else
+                    return 1;        
         }
     }
 }
